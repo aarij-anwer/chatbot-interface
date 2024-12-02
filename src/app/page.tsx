@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef } from "react";
-import axios from "axios";
 import { url } from "./constants";
 
 interface Message {
@@ -16,8 +15,8 @@ const ChatbotPage = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>("");
   const [language, setLanguage] = useState<string>("English");
-  const [isLoading, setIsLoading] = useState<boolean>(false); 
-  const chatWindowRef = useRef<HTMLDivElement>(null); 
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const chatWindowRef = useRef<HTMLDivElement>(null);
   const [buttonIsDisabled, setButtonIsDisabled] = useState<boolean>(true);
 
   const sendMessage = async () => {
@@ -25,26 +24,54 @@ const ChatbotPage = () => {
 
     const userMessage: Message = { user: "You", content: input };
     setMessages((prev) => [...prev, userMessage]);
-    setIsLoading(true); // Show spinner
+    setIsLoading(true);
+
+    let eventSource: EventSource | null = null;
 
     try {
-      const response = await axios.post(url, {
-        user_id: userId,
-        message: input,
-        language,
-      });
+      eventSource = new EventSource(
+        `${url}?user_id=${userId}&message=${encodeURIComponent(input)}&language=${encodeURIComponent(language)}`
+      );
 
-      const botMessage: Message = { user: "Bot", content: response.data.response };
+      let botMessage: Message = { user: "Bot", content: "" };
       setMessages((prev) => [...prev, botMessage]);
+
+      eventSource.onmessage = (event) => {
+        botMessage = {
+          user: "Bot",
+          content: botMessage.content + event.data + " ", // Add space between chunks
+        };
+
+        setMessages((prev) => {
+          const updatedMessages = [...prev];
+          updatedMessages[updatedMessages.length - 1] = botMessage;
+          return updatedMessages;
+        });
+      };
+
+      eventSource.onerror = () => {
+        console.error("Streaming failed or ended.");
+        if (eventSource) eventSource.close(); // Properly close the connection
+        setIsLoading(false);
+      };
     } catch (error) {
       const botError: Message = { user: "Bot", content: "Sorry, something went wrong." };
       setMessages((prev) => [...prev, botError]);
-    } finally {
-      setIsLoading(false); // Hide spinner
+      setIsLoading(false);
     }
 
     setInput("");
+    setButtonIsDisabled(true);
+
+    useEffect(() => {
+      return () => {
+        if (eventSource) {
+          eventSource.close(); // Cleanup on unmount
+        }
+      };
+    }, []);
   };
+
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -123,11 +150,11 @@ const ChatbotPage = () => {
         <input
           type="text"
           value={input}
-          onChange={(e) => { 
+          onChange={(e) => {
             setInput(e.target.value);
             setButtonIsDisabled(!e.target.value.trim());
-          } }
-          onKeyDown={handleKeyPress} 
+          }}
+          onKeyDown={handleKeyPress}
           placeholder="Type your message..."
           className="flex-1 p-2 border border-gray-300 rounded-md shadow-sm"
         />
